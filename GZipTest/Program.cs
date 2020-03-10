@@ -24,10 +24,11 @@ namespace GZipTest
                 if (!File.Exists(inputFile))
                     throw new FileNotFoundException("Input file is not found");
 
+                using var compressor = new GZipCompressor();
                 switch (operation)
                 {
-                    case Operations.Compress: GZipCompressor.Compress(inputFile, outputFile); break;
-                    case Operations.Decompress: GZipCompressor.Decompress(inputFile, outputFile); break;
+                    case "compress": compressor.Compress(inputFile, outputFile); break;
+                    case "decompress": compressor.Decompress(inputFile, outputFile); break;
                     default: throw new InvalidOperationException("Invalid \"operation\" argument");
                 }
                 return 0;
