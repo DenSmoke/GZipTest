@@ -47,33 +47,28 @@ namespace GZipTest
             using var output = new FileStream(FilePartPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
             using var gz = new GZipStream(output, CompressionMode.Compress);
 
-            var pool = ArrayPool<byte>.Shared;
             var bytesToRead = (int)(End - Start);
             var bufferSize = Math.Min(_factory.MaxBufferSize, bytesToRead);
-            var buffer = pool.Rent(bufferSize);
-
+            var pool = ArrayPool<byte>.Shared;
+            var byteArray = pool.Rent(bufferSize);
+            var buffer = new Span<byte>(byteArray, 0, bufferSize);
             try
             {
+                var bytesRead = 0;
                 do
                 {
-                    var bytesRead = 0;
-                    var bytesToReadToBuffer = Math.Min(bytesToRead, bufferSize);
-                    do
-                    {
-                        bytesRead += input.Read(buffer, bytesRead, bytesToReadToBuffer);
-                        bytesToReadToBuffer -= bytesRead;
-                    }
-                    while (bytesToReadToBuffer > 0);
-
-                    gz.Write(buffer, 0, bytesRead);
-
-                    bytesToRead -= bytesRead;
-                }
-                while (bytesToRead > 0);
+                    var n = bytesToRead >= bufferSize ? input.Read(buffer) : input.Read(buffer.Slice(0, bytesToRead));
+                    if (n == bufferSize)
+                        gz.Write(buffer);
+                    else
+                        gz.Write(buffer.Slice(0, n));
+                    bytesRead += n;
+                    bytesToRead -= n;
+                } while (bytesToRead > 0);
             }
             finally
             {
-                pool.Return(buffer);
+                pool.Return(byteArray);
             }
         }
 
