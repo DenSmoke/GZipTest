@@ -1,23 +1,12 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
 
 namespace GZipTest
 {
-    public sealed class GZipCompressor : IDisposable
+    internal sealed class GZipCompressor
     {
-        private readonly bool _disposed;
-        private readonly SemaphoreSlim _semaphore = new SemaphoreSlim(Environment.ProcessorCount);
-
-        public void Dispose()
-        {
-            if (!_disposed)
-            {
-                _semaphore.Dispose();
-            }
-        }
 
         /// <summary>
         ///     Decompress file
@@ -33,53 +22,34 @@ namespace GZipTest
         /// <param name="outputFile">output file path</param>
         public void Compress(string inputFilePath, string outputFilePath)
         {
-            using var factory = new GZipChunkFactory()
+            var factory = new GZipChunkFactory
             {
                 InputFile = inputFilePath,
-                Operation = Operation.Compress
+                Operation = Operation.Compress,
+                BufferSize = 8192
             };
 
             var chunks = factory.Create().ToList();
-
-            var threads = new List<Thread>();
-            chunks.ForEach(chunk =>
+            try
             {
-                _semaphore.Wait();
-                var thread = new Thread(() =>
+                var threads = chunks.Select(chunk =>
                 {
-                    try
-                    {
-                        chunk.Process();
-                    }
-                    finally
-                    {
-                        _semaphore.Release();
-                    }
-                });
-                thread.Start();
-                threads.Add(thread);
-            });
-            threads.ForEach(thread => thread.Join());
+                    var thread = new Thread(chunk.Process);
+                    thread.Start();
+                    return thread;
+                }).ToList();
 
-            ConcatChunks(chunks, factory.HeaderSize, outputFilePath);
-        }
-
-        private void ConcatChunks(List<GZipChunk> chunks, int headerSize, string outputFile)
-        {
-            using var output = new FileStream(outputFile, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
-            var header = new Span<byte>(new byte[headerSize]);
-            BitConverter.TryWriteBytes(header.Slice(0, 4), chunks.Count);
-            for (var i = 0; i < chunks.Count; i++)
-            {
-                BitConverter.TryWriteBytes(header.Slice(8 * i + 4, 8), chunks[i].Start);
+                using var output = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 131072, FileOptions.SequentialScan);
+                for (var i = 0; i < factory.ChunksCount; i++)
+                {
+                    threads[i].Join();
+                    chunks[i].Result.CopyTo(output);
+                }
             }
-            output.Write(header);
-
-            chunks.ForEach(chunk =>
+            finally
             {
-                using var input = new FileStream(chunk.FilePartPath, FileMode.Open, FileAccess.Read, FileShare.None, 4096, FileOptions.SequentialScan);
-                input.CopyTo(output);
-            });
+                chunks.ForEach(chunk => chunk.Dispose());
+            }
         }
     }
 }

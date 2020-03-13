@@ -24,7 +24,7 @@ namespace GZipTest
                 if (!File.Exists(inputFile))
                     throw new FileNotFoundException("Input file is not found");
 
-                using var compressor = new GZipCompressor();
+                var compressor = new GZipCompressor();
                 switch (operation)
                 {
                     case "compress": compressor.Compress(inputFile, outputFile); break;
