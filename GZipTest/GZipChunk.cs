@@ -2,12 +2,11 @@
 using System.Buffers;
 using System.IO;
 using System.IO.Compression;
-using System.Runtime;
 
 namespace GZipTest
 {
 
-    internal sealed class GZipChunk : IDisposable
+    internal sealed class GZipChunk
     {
         private string _tempFilePath;
 
@@ -20,19 +19,6 @@ namespace GZipTest
             Length = length;
         }
 
-        public void Dispose()
-        {
-            if (Result is object)
-            {
-                Result.Dispose();
-                Result = null;
-            }
-            if (_tempFilePath is object)
-            {
-                File.Delete(_tempFilePath);
-            }
-        }
-
         public void Process()
         {
             switch (Operation)
@@ -43,45 +29,42 @@ namespace GZipTest
             }
         }
 
-        public int BufferSize { get; set; }
+        public int BufferSize { get; }
 
-        public string InputFile { get; set; }
+        public string InputFile { get; }
 
-        public Operation Operation { get; set; }
+        public Operation Operation { get; }
 
         public long Start { get; }
 
         public long Length { get; }
 
-        public Stream Result { get; private set; }
+        public GZipChunkState State { get; private set; }
+
+        public Exception Error { get; private set; }
+
+        public Stream GetResultStream() => State == GZipChunkState.Completed
+            ? new FileStream(_tempFilePath, FileMode.Open, FileAccess.Read, FileShare.None, BufferSize, FileOptions.SequentialScan)
+            : null;
 
         private void Compress()
         {
-            using var input = new FileStream(InputFile, FileMode.Open, FileAccess.Read, FileShare.Read, 131072, FileOptions.RandomAccess)
-            {
-                Position = Start
-            };
+            State = GZipChunkState.Processing;
 
-            var bytesToRead = Length;
-            var pool = ArrayPool<byte>.Shared;
-            var byteArray = pool.Rent(BufferSize);
-            var buffer = byteArray.AsSpan(0, BufferSize);
-            MemoryFailPoint mfp = null;
+            var byteArray = ArrayPool<byte>.Shared.Rent(BufferSize);
             try
             {
-                try
+                using var input = new FileStream(InputFile, FileMode.Open, FileAccess.Read, FileShare.Read, BufferSize, FileOptions.RandomAccess)
                 {
-                    mfp = new MemoryFailPoint((int)(Length / 1024 / 1024));
-                    Result = new MemoryStream();
-                }
-                catch (InsufficientMemoryException)
-                {
-                    _tempFilePath = Path.GetTempFileName();
-                    Result = new FileStream(_tempFilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None, 131072, FileOptions.RandomAccess);
-                }
+                    Position = Start
+                };
+                _tempFilePath = Path.GetTempFileName();
+                using var fs = new FileStream(_tempFilePath, FileMode.Open, FileAccess.Write, FileShare.None, BufferSize, FileOptions.SequentialScan);
+                using var gz = new GZipStream(fs, CompressionMode.Compress);
 
-                using var gz = new GZipStream(Result, CompressionMode.Compress, true);
+                var bytesToRead = Length;
                 var bytesRead = 0;
+                var buffer = byteArray.AsSpan(0, BufferSize);
                 do
                 {
                     var n = bytesToRead >= BufferSize
@@ -94,13 +77,17 @@ namespace GZipTest
                     bytesRead += n;
                     bytesToRead -= n;
                 } while (bytesToRead > 0);
+
+                State = GZipChunkState.Completed;
+            }
+            catch (Exception ex)
+            {
+                Error = ex;
+                State = GZipChunkState.Failed;
             }
             finally
             {
-                pool.Return(byteArray);
-                if (mfp is object)
-                    mfp.Dispose();
-                Result.Position = 0;
+                ArrayPool<byte>.Shared.Return(byteArray);
             }
         }
 
