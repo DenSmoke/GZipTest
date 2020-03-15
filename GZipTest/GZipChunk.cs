@@ -1,19 +1,19 @@
 ﻿using System;
-using System.Buffers;
 using System.IO;
 using System.IO.Compression;
+using System.IO.MemoryMappedFiles;
 
 namespace GZipTest
 {
 
     internal sealed class GZipChunk
     {
+        private readonly MemoryMappedFile _mmf;
         private string _tempFilePath;
 
-        public GZipChunk(int bufferSize, string inputFile, Operation operation, long start, long length)
+        public GZipChunk(MemoryMappedFile input, Operation operation, long start, long length)
         {
-            BufferSize = bufferSize;
-            InputFile = inputFile ?? throw new ArgumentNullException(nameof(inputFile));
+            _mmf = input;
             Operation = operation;
             Start = start;
             Length = length;
@@ -29,10 +29,6 @@ namespace GZipTest
             }
         }
 
-        public int BufferSize { get; }
-
-        public string InputFile { get; }
-
         public Operation Operation { get; }
 
         public long Start { get; }
@@ -44,54 +40,50 @@ namespace GZipTest
         public Exception Error { get; private set; }
 
         public Stream GetResultStream() => State == GZipChunkState.Completed
-            ? new FileStream(_tempFilePath, FileMode.Open, FileAccess.Read, FileShare.None, BufferSize, FileOptions.SequentialScan)
+            ? new FileStream(_tempFilePath, FileMode.Open, FileAccess.Read, FileShare.None, 4096, FileOptions.SequentialScan)
             : null;
 
         private void Compress()
         {
             State = GZipChunkState.Processing;
-
-            var byteArray = ArrayPool<byte>.Shared.Rent(BufferSize);
             try
             {
-                using var input = new FileStream(InputFile, FileMode.Open, FileAccess.Read, FileShare.Read, BufferSize, FileOptions.RandomAccess)
-                {
-                    Position = Start
-                };
+                using var input = _mmf.CreateViewStream(Start, Length - 1, MemoryMappedFileAccess.Read);
                 _tempFilePath = Path.GetTempFileName();
-                using var fs = new FileStream(_tempFilePath, FileMode.Open, FileAccess.Write, FileShare.None, BufferSize, FileOptions.SequentialScan);
-                using var gz = new GZipStream(fs, CompressionMode.Compress);
-
-                var bytesToRead = Length;
-                var bytesRead = 0;
-                var buffer = byteArray.AsSpan(0, BufferSize);
-                do
-                {
-                    var n = bytesToRead >= BufferSize
-                        ? input.Read(buffer)
-                        : input.Read(buffer.Slice(0, (int)bytesToRead));
-                    if (n == BufferSize)
-                        gz.Write(buffer);
-                    else
-                        gz.Write(buffer.Slice(0, n));
-                    bytesRead += n;
-                    bytesToRead -= n;
-                } while (bytesToRead > 0);
-
+                using var output = new FileStream(_tempFilePath, FileMode.Open, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
+                using var gz = new GZipStream(output, CompressionMode.Compress);
+                input.CopyTo(gz);
                 State = GZipChunkState.Completed;
             }
             catch (Exception ex)
             {
                 Error = ex;
                 State = GZipChunkState.Failed;
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(byteArray);
+                if (_tempFilePath is object)
+                    File.Delete(_tempFilePath);
             }
         }
 
-        private void Decompress() => throw new NotImplementedException();
+        private void Decompress()
+        {
+            State = GZipChunkState.Processing;
+            try
+            {
+                using var input = _mmf.CreateViewStream(Start, Length - 1, MemoryMappedFileAccess.Read);
+                using var gz = new GZipStream(input, CompressionMode.Decompress);
+                _tempFilePath = Path.GetTempFileName();
+                using var output = new FileStream(_tempFilePath, FileMode.Open, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
+                gz.CopyTo(output);
+                State = GZipChunkState.Completed;
+            }
+            catch (Exception ex)
+            {
+                Error = ex;
+                State = GZipChunkState.Failed;
+                if (_tempFilePath is object)
+                    File.Delete(_tempFilePath);
+            }
+        }
 
     }
 }
