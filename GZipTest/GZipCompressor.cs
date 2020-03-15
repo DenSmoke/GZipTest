@@ -14,7 +14,40 @@ namespace GZipTest
         /// </summary>
         /// <param name="inputFile">input file path</param>
         /// <param name="outputFile">output file path</param>
-        public static void Decompress(string inputFile, string outputFile, int bufferSize = 8192) => throw new NotImplementedException();
+        public static void Decompress(string inputFilePath, string outputFilePath, int bufferSize = 8192)
+        {
+            using var factory = new GZipChunkFactory
+            {
+                InputFile = inputFilePath,
+                Operation = Operation.Decompress
+            };
+
+            using var output = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize, FileOptions.SequentialScan);
+
+            var chunks = factory.Create().ToList();
+            var threads = new List<Thread>(chunks.Count);
+
+            chunks.ForEach(chunk =>
+            {
+                var thread = new Thread(chunk.Process);
+                thread.Start();
+                threads.Add(thread);
+            });
+
+            for (var i = 0; i < chunks.Count; i++)
+            {
+                threads[i].Join();
+
+                var chunk = chunks[i];
+                if (chunk.State == GZipChunkState.Completed)
+                {
+                    using var resultStream = chunk.GetResultStream();
+                    resultStream.CopyTo(output);
+                }
+                else
+                    throw new Exception($"Error occured while processing a chunk: {chunk.Error?.Message}", chunk.Error);
+            }
+        }
 
         /// <summary>
         ///     Compress file
@@ -23,11 +56,10 @@ namespace GZipTest
         /// <param name="outputFile">output file path</param>
         public static void Compress(string inputFilePath, string outputFilePath, int bufferSize = 8192)
         {
-            var factory = new GZipChunkFactory
+            using var factory = new GZipChunkFactory
             {
                 InputFile = inputFilePath,
-                Operation = Operation.Compress,
-                BufferSize = bufferSize
+                Operation = Operation.Compress
             };
 
             using var output = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize, FileOptions.SequentialScan);
