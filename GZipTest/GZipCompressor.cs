@@ -1,11 +1,12 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
 
 namespace GZipTest
 {
-    internal sealed class GZipCompressor
+    public static class GZipCompressor
     {
 
         /// <summary>
@@ -13,42 +14,46 @@ namespace GZipTest
         /// </summary>
         /// <param name="inputFile">input file path</param>
         /// <param name="outputFile">output file path</param>
-        public void Decompress(string inputFile, string outputFile) => throw new NotImplementedException();
+        public static void Decompress(string inputFile, string outputFile, int bufferSize = 8192) => throw new NotImplementedException();
 
         /// <summary>
         ///     Compress file
         /// </summary>
         /// <param name="inputFile">input file path</param>
         /// <param name="outputFile">output file path</param>
-        public void Compress(string inputFilePath, string outputFilePath)
+        public static void Compress(string inputFilePath, string outputFilePath, int bufferSize = 8192)
         {
             var factory = new GZipChunkFactory
             {
                 InputFile = inputFilePath,
                 Operation = Operation.Compress,
-                BufferSize = 8192
+                BufferSize = bufferSize
             };
 
-            var chunks = factory.Create().ToList();
-            try
-            {
-                var threads = chunks.Select(chunk =>
-                {
-                    var thread = new Thread(chunk.Process);
-                    thread.Start();
-                    return thread;
-                }).ToList();
+            using var output = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize, FileOptions.SequentialScan);
 
-                using var output = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 131072, FileOptions.SequentialScan);
-                for (var i = 0; i < factory.ChunksCount; i++)
-                {
-                    threads[i].Join();
-                    chunks[i].Result.CopyTo(output);
-                }
-            }
-            finally
+            var chunks = factory.Create().ToList();
+            var threads = new List<Thread>(chunks.Count);
+
+            chunks.ForEach(chunk =>
             {
-                chunks.ForEach(chunk => chunk.Dispose());
+                var thread = new Thread(chunk.Process);
+                thread.Start();
+                threads.Add(thread);
+            });
+
+            for (var i = 0; i < chunks.Count; i++)
+            {
+                threads[i].Join();
+
+                var chunk = chunks[i];
+                if (chunk.State == GZipChunkState.Completed)
+                {
+                    using var resultStream = chunk.GetResultStream();
+                    resultStream.CopyTo(output);
+                }
+                else
+                    throw new Exception($"Error occured while processing a chunk: {chunk.Error?.Message}", chunk.Error);
             }
         }
     }
