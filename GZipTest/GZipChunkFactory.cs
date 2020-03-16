@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.MemoryMappedFiles;
@@ -80,38 +81,51 @@ namespace GZipTest
 
         public List<long> GetBlockIndices()
         {
-            //using var input = new FileStream(InputFile, FileMode.Open, FileAccess.Read, FileShare.Read, BufferSize, FileOptions.SequentialScan);
             using var input = _mmf.CreateViewStream(0, 0, MemoryMappedFileAccess.Read);
 
             var header = new byte[GZIP_HEADER_SIZE];
-            var bytesRead = 0;
+            long bytesRead = 0;
             var bytesToRead = GZIP_HEADER_SIZE;
             do
             {
-                var n = input.Read(header, bytesRead, bytesToRead);
+                var n = input.Read(header, (int)bytesRead, bytesToRead);
                 bytesRead += n;
                 bytesToRead -= n;
             }
             while (bytesToRead > 0);
 
             var blockIndices = new List<long>() { 0 };
-            var patternLength = header.Length;
             var matchCount = 0;
 
-            int _byte;
-            while ((_byte = input.ReadByte()) != -1)
+            var byteArray = ArrayPool<byte>.Shared.Rent(100 * 1024 * 1024);
+            try
             {
-                if (_byte == header[matchCount])
+                while (true)
                 {
-                    matchCount++;
-                    if (matchCount == patternLength)
+                    var n = input.Read(byteArray);
+                    if (n == 0)
+                        break;
+
+                    bytesRead += n;
+                    for (var i = 0; i < n; i++)
                     {
-                        blockIndices.Add(input.Position - patternLength);
-                        matchCount = 0;
+                        if (byteArray[i] == header[matchCount])
+                        {
+                            matchCount++;
+                            if (matchCount == GZIP_HEADER_SIZE)
+                            {
+                                blockIndices.Add(bytesRead - (n - i) - (GZIP_HEADER_SIZE - 1));
+                                matchCount = 0;
+                            }
+                        }
+                        else
+                            matchCount = 0;
                     }
                 }
-                else
-                    matchCount = 0;
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(byteArray);
             }
             return blockIndices;
         }
