@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -14,7 +15,7 @@ namespace GZipTest
         /// </summary>
         /// <param name="inputFile">input file path</param>
         /// <param name="outputFile">output file path</param>
-        public static void Decompress(string inputFilePath, string outputFilePath, int bufferSize = 8192)
+        public static void Decompress(string inputFilePath, string outputFilePath)
         {
             using var factory = new GZipChunkFactory
             {
@@ -22,11 +23,13 @@ namespace GZipTest
                 Operation = Operation.Decompress
             };
 
-            using var output = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize, FileOptions.SequentialScan);
+            using var output = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
 
+            Debug.WriteLine("Chunks generation start");
             var chunks = factory.Create().ToList();
-            var threads = new List<Thread>(chunks.Count);
 
+            Debug.WriteLine("Chunks processing start");
+            var threads = new List<Thread>(chunks.Count);
             chunks.ForEach(chunk =>
             {
                 var thread = new Thread(chunk.Process);
@@ -38,6 +41,7 @@ namespace GZipTest
             {
                 threads[i].Join();
 
+                Debug.WriteLine("Writing chunk {0}", i);
                 var chunk = chunks[i];
                 if (chunk.State == GZipChunkState.Completed)
                 {
@@ -54,7 +58,7 @@ namespace GZipTest
         /// </summary>
         /// <param name="inputFile">input file path</param>
         /// <param name="outputFile">output file path</param>
-        public static void Compress(string inputFilePath, string outputFilePath, int bufferSize = 8192)
+        public static void Compress(string inputFilePath, string outputFilePath)
         {
             using var factory = new GZipChunkFactory
             {
@@ -62,11 +66,13 @@ namespace GZipTest
                 Operation = Operation.Compress
             };
 
-            using var output = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize, FileOptions.SequentialScan);
+            using var output = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
 
+            Debug.WriteLine("Chunks generation start");
             var chunks = factory.Create().ToList();
-            var threads = new List<Thread>(chunks.Count);
 
+            Debug.WriteLine("Chunks processing start");
+            var threads = new List<Thread>(chunks.Count);
             chunks.ForEach(chunk =>
             {
                 var thread = new Thread(chunk.Process);
@@ -78,6 +84,7 @@ namespace GZipTest
             {
                 threads[i].Join();
 
+                Debug.WriteLine("Writing chunk {0}", i);
                 var chunk = chunks[i];
                 if (chunk.State == GZipChunkState.Completed)
                 {
