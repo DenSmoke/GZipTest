@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -25,10 +24,10 @@ namespace GZipTest
 
             using var output = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
 
-            Debug.WriteLine("Chunks generation start");
+            Console.WriteLine("Chunks generation start");
             var chunks = factory.Create().ToList();
 
-            Debug.WriteLine("Chunks processing start");
+            Console.WriteLine("Chunks processing start");
             var threads = new List<Thread>(chunks.Count);
             chunks.ForEach(chunk =>
             {
@@ -41,7 +40,7 @@ namespace GZipTest
             {
                 threads[i].Join();
 
-                Debug.WriteLine("Writing chunk {0}", i);
+                Console.WriteLine("Writing chunk {0}", i + 1);
                 var chunk = chunks[i];
                 if (chunk.State == GZipChunkState.Completed)
                 {
@@ -68,10 +67,10 @@ namespace GZipTest
 
             using var output = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
 
-            Debug.WriteLine("Chunks generation start");
+            Console.WriteLine("Chunks generation start");
             var chunks = factory.Create().ToList();
 
-            Debug.WriteLine("Chunks processing start");
+            Console.WriteLine("Chunks processing start");
             var threads = new List<Thread>(chunks.Count);
             chunks.ForEach(chunk =>
             {
@@ -80,20 +79,27 @@ namespace GZipTest
                 threads.Add(thread);
             });
 
+            var chunkPointers = new List<long>(chunks.Count) { 0 };
             for (var i = 0; i < chunks.Count; i++)
             {
                 threads[i].Join();
 
-                Debug.WriteLine("Writing chunk {0}", i);
+                Console.WriteLine("Writing chunk {0}", i + 1);
                 var chunk = chunks[i];
                 if (chunk.State == GZipChunkState.Completed)
                 {
                     using var resultStream = chunk.GetResultStream();
                     resultStream.CopyTo(output);
+                    chunkPointers.Add(output.Position);
                 }
                 else
                     throw new Exception($"Error occured while processing a chunk: {chunk.Error?.Message}", chunk.Error);
             }
+
+            using var bw = new BinaryWriter(output);
+            for (var i = 0; i < chunks.Count; i++)
+                bw.Write(chunkPointers[i]);
+            bw.Write(chunks.Count);
         }
     }
 }
