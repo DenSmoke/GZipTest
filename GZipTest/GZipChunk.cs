@@ -48,7 +48,7 @@ namespace GZipTest
             State = GZipChunkState.Processing;
             try
             {
-                using var input = _mmf.CreateViewStream(Start, Length - 1, MemoryMappedFileAccess.Read);
+                using var input = _mmf.CreateViewStream(Start, Length, MemoryMappedFileAccess.Read);
                 _tempFilePath = Path.GetTempFileName();
                 using var output = new FileStream(_tempFilePath, FileMode.Open, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
                 using var gz = new GZipStream(output, CompressionMode.Compress);
@@ -69,7 +69,7 @@ namespace GZipTest
             State = GZipChunkState.Processing;
             try
             {
-                using var input = _mmf.CreateViewStream(Start, Length - 1, MemoryMappedFileAccess.Read);
+                using var input = _mmf.CreateViewStream(Start, Length, MemoryMappedFileAccess.Read);
                 using var gz = new GZipStream(input, CompressionMode.Decompress);
                 _tempFilePath = Path.GetTempFileName();
                 using var output = new FileStream(_tempFilePath, FileMode.Open, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
