@@ -20,13 +20,13 @@ namespace GZipTest
                 var inputFile = args[1];
                 var outputFile = args[2];
 
+                var compressor = new GZipCompressor();
                 switch (operation)
                 {
-                    case "compress": GZipCompressor.Compress(inputFile, outputFile); break;
-                    case "decompress": GZipCompressor.Decompress(inputFile, outputFile); break;
+                    case "compress": compressor.Compress(inputFile, outputFile); return 0;
+                    case "decompress": compressor.Decompress(inputFile, outputFile); return 0;
                     default: throw new InvalidOperationException("Invalid \"operation\" argument");
                 }
-                return 0;
             }
             catch (Exception ex)
             {
