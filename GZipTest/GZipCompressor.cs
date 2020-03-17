@@ -88,12 +88,12 @@ namespace GZipTest
             }
         }
 
-        private static void AddFooter(FileStream output, List<long> chunkPointers)
+        private static void AddFooter(FileStream output, long[] chunkPointers)
         {
             using var bw = new BinaryWriter(output);
-            for (var i = 0; i < chunkPointers.Count; i++)
+            for (var i = 0; i < chunkPointers.Length; i++)
                 bw.Write(chunkPointers[i]);
-            bw.Write(chunkPointers.Count);
+            bw.Write(chunkPointers.Length);
         }
 
         private void Process(string inputFilePath, string outputFilePath, CompressionMode mode)
@@ -116,34 +116,37 @@ namespace GZipTest
                 CompressionMode.Compress => CreateForCompression(),
                 CompressionMode.Decompress => CreateForDecompression(input),
                 _ => throw new InvalidOperationException("Unknown operation mode")
-            }).ToList();
+            }).ToArray();
 
-            Console.WriteLine("{0} chunks generated", chunks.Count);
+            Console.WriteLine("{0} chunks generated", chunks.Length);
             Console.WriteLine("Chunks processing start");
 
-            chunks.ForEach(chunk => chunk.StartProcessing(input));
+            for (var i = 0; i < chunks.Length; i++)
+                chunks[i].StartProcessing(input);
 
             Console.WriteLine("Chunks flushing start");
 
             switch (mode)
             {
                 case CompressionMode.Compress:
-                    var chunkPointers = new List<long>(chunks.Count) { 0 };
-                    chunks.ForEach(chunk =>
+                    var chunkPointers = new long[chunks.Length];
+                    for (var i = 0; i < chunks.Length; i++)
                     {
+                        var chunk = chunks[i];
                         Console.WriteLine("Writing chunk {0}", chunk.Id);
+                        chunkPointers[i] = output.Position;
                         chunk.FlushChunk(output);
-                        chunkPointers.Add(output.Position);
-                    });
+                    }
                     AddFooter(output, chunkPointers);
                     return;
 
                 case CompressionMode.Decompress:
-                    chunks.ForEach(chunk =>
+                    for (var i = 0; i < chunks.Length; i++)
                     {
+                        var chunk = chunks[i];
                         Console.WriteLine("Writing chunk {0}", chunk.Id);
                         chunk.FlushChunk(output);
-                    });
+                    }
                     return;
 
                 default:
