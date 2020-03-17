@@ -4,9 +4,13 @@ using System.IO;
 using System.IO.Compression;
 using System.IO.MemoryMappedFiles;
 using System.Linq;
+using System.Threading;
 
 namespace GZipTest
 {
+    /// <summary>
+    ///     Class for multithreaded compression/decompression using <see cref="GZipStream"/>
+    /// </summary>
     public class GZipCompressor
     {
         private long _fileSize;
@@ -16,6 +20,23 @@ namespace GZipTest
         /// </summary>
         /// <param name="inputFilePath">input file path</param>
         /// <param name="outputFilePath">output file path</param>
+        /// <exception cref="Exception"/>
+        /// <exception cref="ArgumentNullException"/>
+        /// <exception cref="System.Security.SecurityException"/>
+        /// <exception cref="ArgumentException"/>
+        /// <exception cref="UnauthorizedAccessException"/>
+        /// <exception cref="PathTooLongException"/>
+        /// <exception cref="NotSupportedException"/>
+        /// <exception cref="InvalidOperationException"/>
+        /// <exception cref="IOException"/>
+        /// <exception cref="FileNotFoundException"/>
+        /// <exception cref="ArgumentOutOfRangeException"/>
+        /// <exception cref="DirectoryNotFoundException"/>
+        /// <exception cref="ThreadStateException"/>
+        /// <exception cref="OutOfMemoryException"/>
+        /// <exception cref="ThreadInterruptedException"/>
+        /// <exception cref="ObjectDisposedException"/>
+        /// <exception cref="OverflowException"/>
         public void Compress(string inputFilePath, string outputFilePath) =>
             Process(inputFilePath, outputFilePath, CompressionMode.Compress);
 
@@ -24,9 +45,30 @@ namespace GZipTest
         /// </summary>
         /// <param name="inputFilePath">input file path</param>
         /// <param name="outputFilePath">output file path</param>
+        /// <exception cref="Exception"/>
+        /// <exception cref="ArgumentNullException"/>
+        /// <exception cref="System.Security.SecurityException"/>
+        /// <exception cref="ArgumentException"/>
+        /// <exception cref="UnauthorizedAccessException"/>
+        /// <exception cref="PathTooLongException"/>
+        /// <exception cref="NotSupportedException"/>
+        /// <exception cref="InvalidOperationException"/>
+        /// <exception cref="IOException"/>
+        /// <exception cref="FileNotFoundException"/>
+        /// <exception cref="ArgumentOutOfRangeException"/>
+        /// <exception cref="DirectoryNotFoundException"/>
+        /// <exception cref="ThreadStateException"/>
+        /// <exception cref="OutOfMemoryException"/>
+        /// <exception cref="ThreadInterruptedException"/>
+        /// <exception cref="ObjectDisposedException"/>
+        /// <exception cref="OverflowException"/>
         public void Decompress(string inputFilePath, string outputFilePath) =>
             Process(inputFilePath, outputFilePath, CompressionMode.Decompress);
 
+        /// <summary>
+        ///     Generate chunks for file compression
+        /// </summary>
+        /// <returns></returns>
         private IEnumerable<GZipChunk> CreateForCompression()
         {
             if (_fileSize <= 1024 * 1024)
@@ -53,6 +95,15 @@ namespace GZipTest
             }
         }
 
+        /// <summary>
+        ///     Generate chunks for file decompression
+        /// </summary>
+        /// <param name="input"></param>
+        /// <returns></returns>
+        /// <exception cref="Exception"/>
+        /// <exception cref="ArgumentOutOfRangeException"/>
+        /// <exception cref="UnauthorizedAccessException"/>
+        /// <exception cref="IOException"/>
         private IEnumerable<GZipChunk> CreateForDecompression(MemoryMappedFile input)
         {
             int chunksCount;
@@ -88,19 +139,57 @@ namespace GZipTest
             }
         }
 
-        private static void AddFooter(FileStream output, long[] chunkPointers)
+        /// <summary>
+        ///     Add footer containing start positions of chunks and their count to output stream
+        /// </summary>
+        /// <param name="output">output stream</param>
+        /// <param name="chunkPointers">start positions of chunks</param>
+        /// <exception cref="ArgumentNullException"/>
+        /// <exception cref="ArgumentException"/>
+        /// <exception cref="OverflowException"/>
+        /// <exception cref="IOException"/>
+        /// <exception cref="ObjectDisposedException"/>
+        private static void AddFooter(Stream output, long[] chunkPointers)
         {
+            if (output is null)
+                throw new ArgumentNullException(nameof(output));
+            if (chunkPointers is null)
+                throw new ArgumentNullException(nameof(chunkPointers));
+
             using var bw = new BinaryWriter(output);
             for (var i = 0; i < chunkPointers.Length; i++)
                 bw.Write(chunkPointers[i]);
             bw.Write(chunkPointers.Length);
         }
 
+        /// <summary>
+        ///     Compress or decompress input file to output file depending on <see cref="CompressionMode"/>
+        /// </summary>
+        /// <param name="inputFilePath">path to input file</param>
+        /// <param name="outputFilePath">path to output file</param>
+        /// <param name="mode">compression mode</param>
+        /// <exception cref="Exception"/>
+        /// <exception cref="ArgumentNullException"/>
+        /// <exception cref="System.Security.SecurityException"/>
+        /// <exception cref="ArgumentException"/>
+        /// <exception cref="UnauthorizedAccessException"/>
+        /// <exception cref="PathTooLongException"/>
+        /// <exception cref="NotSupportedException"/>
+        /// <exception cref="InvalidOperationException"/>
+        /// <exception cref="IOException"/>
+        /// <exception cref="FileNotFoundException"/>
+        /// <exception cref="ArgumentOutOfRangeException"/>
+        /// <exception cref="DirectoryNotFoundException"/>
+        /// <exception cref="ThreadStateException"/>
+        /// <exception cref="OutOfMemoryException"/>
+        /// <exception cref="ThreadInterruptedException"/>
+        /// <exception cref="ObjectDisposedException"/>
+        /// <exception cref="OverflowException"/>
         private void Process(string inputFilePath, string outputFilePath, CompressionMode mode)
         {
             var fileInfo = new FileInfo(inputFilePath);
             if (!fileInfo.Exists)
-                throw new InvalidOperationException("Input file does not exists");
+                throw new FileNotFoundException("Input file does not exists");
 
             _fileSize = fileInfo.Length;
             if (_fileSize == 0)
