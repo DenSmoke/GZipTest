@@ -1,105 +1,154 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
+using System.IO.MemoryMappedFiles;
 using System.Linq;
-using System.Threading;
 
 namespace GZipTest
 {
-    public static class GZipCompressor
+    public class GZipCompressor
     {
-
-        /// <summary>
-        ///     Decompress file
-        /// </summary>
-        /// <param name="inputFile">input file path</param>
-        /// <param name="outputFile">output file path</param>
-        public static void Decompress(string inputFilePath, string outputFilePath)
-        {
-            using var factory = new GZipChunkFactory
-            {
-                InputFile = inputFilePath,
-                Operation = Operation.Decompress
-            };
-
-            using var output = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
-
-            Console.WriteLine("Chunks generation start");
-            var chunks = factory.Create().ToList();
-
-            Console.WriteLine("Chunks processing start");
-            var threads = new List<Thread>(chunks.Count);
-            chunks.ForEach(chunk =>
-            {
-                var thread = new Thread(chunk.Process);
-                thread.Start();
-                threads.Add(thread);
-            });
-
-            for (var i = 0; i < chunks.Count; i++)
-            {
-                threads[i].Join();
-
-                Console.WriteLine("Writing chunk {0}", i + 1);
-                var chunk = chunks[i];
-                if (chunk.State == GZipChunkState.Completed)
-                {
-                    using var resultStream = chunk.GetResultStream();
-                    resultStream.CopyTo(output);
-                }
-                else
-                    throw new Exception($"Error occured while processing a chunk: {chunk.Error?.Message}", chunk.Error);
-            }
-        }
+        private long _fileSize;
 
         /// <summary>
         ///     Compress file
         /// </summary>
-        /// <param name="inputFile">input file path</param>
-        /// <param name="outputFile">output file path</param>
-        public static void Compress(string inputFilePath, string outputFilePath)
-        {
-            using var factory = new GZipChunkFactory
-            {
-                InputFile = inputFilePath,
-                Operation = Operation.Compress
-            };
+        /// <param name="inputFilePath">input file path</param>
+        /// <param name="outputFilePath">output file path</param>
+        public void Compress(string inputFilePath, string outputFilePath) =>
+            Process(inputFilePath, outputFilePath, CompressionMode.Compress);
 
+        /// <summary>
+        ///     Decompress file
+        /// </summary>
+        /// <param name="inputFilePath">input file path</param>
+        /// <param name="outputFilePath">output file path</param>
+        public void Decompress(string inputFilePath, string outputFilePath) =>
+            Process(inputFilePath, outputFilePath, CompressionMode.Decompress);
+
+        private IEnumerable<GZipChunk> CreateForCompression()
+        {
+            if (_fileSize <= 1024 * 1024)
+            {
+                yield return new GZipChunk(1, CompressionMode.Compress, 0, _fileSize);
+            }
+            else
+            {
+                var processors = Environment.ProcessorCount;
+                var div = _fileSize / processors;
+                var rem = _fileSize % processors;
+                long start = 0;
+                for (var i = 0; i < processors; i++)
+                {
+                    var chunkSize = div;
+                    if (rem > 0)
+                    {
+                        chunkSize++;
+                        rem--;
+                    }
+                    yield return new GZipChunk(i + 1, CompressionMode.Compress, start, chunkSize);
+                    start += chunkSize;
+                }
+            }
+        }
+
+        private IEnumerable<GZipChunk> CreateForDecompression(MemoryMappedFile input)
+        {
+            int chunksCount;
+            using var viewAccessor = input.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+            long[] gzipBlockIndices;
+            try
+            {
+                chunksCount = viewAccessor.ReadInt32(_fileSize - 4);
+                if (chunksCount < 0)
+                    throw new InvalidOperationException("Wrong file format");
+                gzipBlockIndices = new long[chunksCount];
+                for (var i = 0; i < chunksCount; i++)
+                {
+                    long position;
+                    long index;
+                    if ((position = _fileSize - 8 * (chunksCount - i) - 4) < 0 || (index = viewAccessor.ReadInt64(position)) < 0)
+                        throw new InvalidOperationException("Wrong file format");
+                    gzipBlockIndices[i] = index;
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"File parse error: {ex.Message}", ex);
+            }
+
+            for (var i = 0; i < chunksCount; i++)
+            {
+                var start = gzipBlockIndices[i];
+                var chunkSize = i + 1 < chunksCount
+                    ? gzipBlockIndices[i + 1] - start
+                    : _fileSize - start - (chunksCount * 8 + 4);
+                yield return new GZipChunk(i + 1, CompressionMode.Decompress, start, chunkSize);
+            }
+        }
+
+        private static void AddFooter(FileStream output, List<long> chunkPointers)
+        {
+            using var bw = new BinaryWriter(output);
+            for (var i = 0; i < chunkPointers.Count; i++)
+                bw.Write(chunkPointers[i]);
+            bw.Write(chunkPointers.Count);
+        }
+
+        private void Process(string inputFilePath, string outputFilePath, CompressionMode mode)
+        {
+            var fileInfo = new FileInfo(inputFilePath);
+            if (!fileInfo.Exists)
+                throw new InvalidOperationException("Input file does not exists");
+
+            _fileSize = fileInfo.Length;
+            if (_fileSize == 0)
+                throw new InvalidOperationException("File is empty");
+
+            using var input = MemoryMappedFile.CreateFromFile(inputFilePath, FileMode.Open, Path.GetFileName(inputFilePath), 0, MemoryMappedFileAccess.Read);
             using var output = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
 
             Console.WriteLine("Chunks generation start");
-            var chunks = factory.Create().ToList();
 
+            var chunks = (mode switch
+            {
+                CompressionMode.Compress => CreateForCompression(),
+                CompressionMode.Decompress => CreateForDecompression(input),
+                _ => throw new InvalidOperationException("Unknown operation mode")
+            }).ToList();
+
+            Console.WriteLine("{0} chunks generated", chunks.Count);
             Console.WriteLine("Chunks processing start");
-            var threads = new List<Thread>(chunks.Count);
-            chunks.ForEach(chunk =>
-            {
-                var thread = new Thread(chunk.Process);
-                thread.Start();
-                threads.Add(thread);
-            });
 
-            var chunkPointers = new List<long>(chunks.Count) { 0 };
-            for (var i = 0; i < chunks.Count; i++)
-            {
-                threads[i].Join();
+            chunks.ForEach(chunk => chunk.StartProcessing(input));
 
-                Console.WriteLine("Writing chunk {0}", i + 1);
-                var chunk = chunks[i];
-                if (chunk.State == GZipChunkState.Completed)
-                {
-                    using var resultStream = chunk.GetResultStream();
-                    resultStream.CopyTo(output);
-                    chunkPointers.Add(output.Position);
-                }
-                else
-                    throw new Exception($"Error occured while processing a chunk: {chunk.Error?.Message}", chunk.Error);
+            Console.WriteLine("Chunks flushing start");
+
+            switch (mode)
+            {
+                case CompressionMode.Compress:
+                    var chunkPointers = new List<long>(chunks.Count) { 0 };
+                    chunks.ForEach(chunk =>
+                    {
+                        Console.WriteLine("Writing chunk {0}", chunk.Id);
+                        chunk.FlushChunk(output);
+                        chunkPointers.Add(output.Position);
+                    });
+                    AddFooter(output, chunkPointers);
+                    return;
+
+                case CompressionMode.Decompress:
+                    chunks.ForEach(chunk =>
+                    {
+                        Console.WriteLine("Writing chunk {0}", chunk.Id);
+                        chunk.FlushChunk(output);
+                    });
+                    return;
+
+                default:
+                    throw new InvalidOperationException("Unknown operation mode");
             }
-
-            using var bw = new BinaryWriter(output);
-            for (var i = 0; i < chunks.Count; i++)
-                bw.Write(chunkPointers[i]);
-            bw.Write(chunks.Count);
         }
     }
 }
