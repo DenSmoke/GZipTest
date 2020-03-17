@@ -2,34 +2,36 @@
 using System.IO;
 using System.IO.Compression;
 using System.IO.MemoryMappedFiles;
+using System.Threading;
 
 namespace GZipTest
 {
-
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001:Types that own disposable fields should be disposable", Justification = "<Pending>")]
     internal sealed class GZipChunk
     {
-        private readonly MemoryMappedFile _mmf;
-        private string _tempFilePath;
+        private Thread _thread;
+        private Stream _resultStream;
 
-        public GZipChunk(MemoryMappedFile input, Operation operation, long start, long length)
+        public GZipChunk(int id, CompressionMode mode, long start, long length)
         {
-            _mmf = input;
-            Operation = operation;
+            Id = id;
+            Mode = mode;
             Start = start;
             Length = length;
         }
 
-        public void Process()
+        ~GZipChunk()
         {
-            switch (Operation)
+            if (_resultStream is object)
             {
-                case Operation.Compress: Compress(); break;
-                case Operation.Decompress: Decompress(); break;
-                default: break;
+                _resultStream.Dispose();
+                _resultStream = null;
             }
         }
 
-        public Operation Operation { get; }
+        public int Id { get; }
+
+        public CompressionMode Mode { get; }
 
         public long Start { get; }
 
@@ -39,51 +41,63 @@ namespace GZipTest
 
         public Exception Error { get; private set; }
 
-        public Stream GetResultStream() => State == GZipChunkState.Completed
-            ? new FileStream(_tempFilePath, FileMode.Open, FileAccess.Read, FileShare.None, 4096, FileOptions.SequentialScan)
-            : null;
+        public void StartProcessing(MemoryMappedFile inputFile)
+        {
+            _thread = new Thread(() => Process(inputFile));
+            _thread.Start();
+        }
 
-        private void Compress()
+        public void FlushChunk(Stream output)
+        {
+            if (_thread is null)
+                throw new InvalidOperationException("Processing should be started before flushing");
+
+            if (_thread.IsAlive)
+                _thread.Join();
+
+            if (State == GZipChunkState.Completed && _resultStream is object)
+                using (_resultStream)
+                    _resultStream.CopyTo(output);
+            else
+                throw new Exception($"Error occured while processing a chunk: {Error?.Message}", Error);
+        }
+
+        private void Process(MemoryMappedFile inputFile)
         {
             State = GZipChunkState.Processing;
             try
             {
-                using var input = _mmf.CreateViewStream(Start, Length, MemoryMappedFileAccess.Read);
-                _tempFilePath = Path.GetTempFileName();
-                using var output = new FileStream(_tempFilePath, FileMode.Open, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
-                using var gz = new GZipStream(output, CompressionMode.Compress);
-                input.CopyTo(gz);
+                _resultStream = new FileStream(Path.GetTempFileName(), FileMode.Open, FileAccess.ReadWrite,
+                                               FileShare.None, 4096, FileOptions.DeleteOnClose);
+
+                using (var input = inputFile.CreateViewStream(Start, Length, MemoryMappedFileAccess.Read))
+                {
+                    switch (Mode)
+                    {
+                        case CompressionMode.Compress:
+                            using (var gz = new GZipStream(_resultStream, Mode, true))
+                                input.CopyTo(gz);
+                            break;
+                        case CompressionMode.Decompress:
+                            using (var gz = new GZipStream(input, Mode, true))
+                                gz.CopyTo(_resultStream);
+                            break;
+                        default: throw new InvalidOperationException("Unknown operation type");
+                    }
+                }
+                _resultStream.Position = 0;
                 State = GZipChunkState.Completed;
             }
             catch (Exception ex)
             {
                 Error = ex;
                 State = GZipChunkState.Failed;
-                if (_tempFilePath is object)
-                    File.Delete(_tempFilePath);
+                if (_resultStream is object)
+                {
+                    _resultStream.Dispose();
+                    _resultStream = null;
+                }
             }
         }
-
-        private void Decompress()
-        {
-            State = GZipChunkState.Processing;
-            try
-            {
-                using var input = _mmf.CreateViewStream(Start, Length, MemoryMappedFileAccess.Read);
-                using var gz = new GZipStream(input, CompressionMode.Decompress);
-                _tempFilePath = Path.GetTempFileName();
-                using var output = new FileStream(_tempFilePath, FileMode.Open, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
-                gz.CopyTo(output);
-                State = GZipChunkState.Completed;
-            }
-            catch (Exception ex)
-            {
-                Error = ex;
-                State = GZipChunkState.Failed;
-                if (_tempFilePath is object)
-                    File.Delete(_tempFilePath);
-            }
-        }
-
     }
 }
