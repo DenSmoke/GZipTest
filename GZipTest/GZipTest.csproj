@@ -1,9 +1,16 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>netcoreapp3.1</TargetFramework>
     <Platforms>AnyCPU;x64;x86</Platforms>
+    <Authors>Denis Perevozchikov</Authors>
+    <Description>Multithreaded GZip compressor</Description>
+    <Copyright>@ Denis Perevozchikov</Copyright>
+    <PackageProjectUrl>https://github.com/DenSmoke/GZipTest</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/DenSmoke/GZipTest</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <NeutralLanguage>en</NeutralLanguage>
   </PropertyGroup>
 
   <ItemGroup>
