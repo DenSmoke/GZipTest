@@ -73,7 +73,7 @@ namespace GZipTest
         {
             if (_fileSize <= 1024 * 1024)
             {
-                yield return new GZipChunk(1, CompressionMode.Compress, 0, _fileSize);
+                yield return new GZipChunk(CompressionMode.Compress, 0, _fileSize);
             }
             else
             {
@@ -89,7 +89,7 @@ namespace GZipTest
                         chunkSize++;
                         rem--;
                     }
-                    yield return new GZipChunk(i + 1, CompressionMode.Compress, start, chunkSize);
+                    yield return new GZipChunk(CompressionMode.Compress, start, chunkSize);
                     start += chunkSize;
                 }
             }
@@ -135,7 +135,7 @@ namespace GZipTest
                 var chunkSize = i + 1 < chunksCount
                     ? gzipBlockIndices[i + 1] - start
                     : _fileSize - start - (chunksCount * 8 + 4);
-                yield return new GZipChunk(i + 1, CompressionMode.Decompress, start, chunkSize);
+                yield return new GZipChunk(CompressionMode.Decompress, start, chunkSize);
             }
         }
 
@@ -198,22 +198,17 @@ namespace GZipTest
             using var input = MemoryMappedFile.CreateFromFile(inputFilePath, FileMode.Open, Path.GetFileName(inputFilePath), 0, MemoryMappedFileAccess.Read);
             using var output = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
 
-            Console.WriteLine("Chunks generation start");
-
             var chunks = (mode switch
             {
                 CompressionMode.Compress => CreateForCompression(),
                 CompressionMode.Decompress => CreateForDecompression(input),
                 _ => throw new InvalidOperationException("Unknown operation mode")
             }).ToArray();
-
             Console.WriteLine("{0} chunks generated", chunks.Length);
-            Console.WriteLine("Chunks processing start");
 
             for (var i = 0; i < chunks.Length; i++)
                 chunks[i].StartProcessing(input);
-
-            Console.WriteLine("Chunks flushing start");
+            Console.WriteLine("Chunks processing started");
 
             switch (mode)
             {
@@ -222,9 +217,9 @@ namespace GZipTest
                     for (var i = 0; i < chunks.Length; i++)
                     {
                         var chunk = chunks[i];
-                        Console.WriteLine("Writing chunk {0}", chunk.Id);
                         chunkPointers[i] = output.Position;
                         chunk.FlushChunk(output);
+                        Console.WriteLine("Written chunk {0} of {1}", i + 1, chunks.Length);
                     }
                     AddFooter(output, chunkPointers);
                     return;
@@ -233,8 +228,8 @@ namespace GZipTest
                     for (var i = 0; i < chunks.Length; i++)
                     {
                         var chunk = chunks[i];
-                        Console.WriteLine("Writing chunk {0}", chunk.Id);
                         chunk.FlushChunk(output);
+                        Console.WriteLine("Written chunk {0} of {1}", i + 1, chunks.Length);
                     }
                     return;
 
