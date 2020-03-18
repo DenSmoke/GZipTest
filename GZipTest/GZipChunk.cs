@@ -18,13 +18,11 @@ namespace GZipTest
         /// <summary>
         ///     Create <see cref="GZipChunk"/> instance
         /// </summary>
-        /// <param name="id">identifier of chunk</param>
         /// <param name="mode">compression mode</param>
         /// <param name="start">start position in input file</param>
         /// <param name="length">length in input file</param>
-        public GZipChunk(int id, CompressionMode mode, long start, long length)
+        public GZipChunk(CompressionMode mode, long start, long length)
         {
-            Id = id;
             Mode = mode;
             Start = start;
             Length = length;
@@ -41,11 +39,6 @@ namespace GZipTest
                 _resultStream = null;
             }
         }
-
-        /// <summary>
-        ///     Chunk identifier
-        /// </summary>
-        public int Id { get; }
 
         /// <summary>
         ///     Compression mode
